@@ -18,6 +18,7 @@ import android.app.KeyguardManager;
 import android.app.RemoteAction;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -53,6 +54,7 @@ import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.animation.LinearInterpolator;
 import android.widget.FrameLayout;
+import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -91,6 +93,8 @@ import org.telegram.messenger.voip.VideoCapturerDevice;
 import org.telegram.messenger.voip.VoIPService;
 import org.telegram.messenger.voip.VoIPServiceState;
 import org.telegram.messenger.voip.VoipAudioManager;
+import org.telegram.messenger.translation.VoIPMicDebug;
+import org.telegram.messenger.translation.TranslationConfig;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
@@ -229,6 +233,8 @@ public class VoIPFragment implements
     float touchSlop;
 
     private static VoIPFragment instance;
+    private VoIPMicDebug micDebug;
+    private TextView micDebugStatus;
     private VoIPWindowView windowView;
     private int statusLayoutAnimateToOffset;
 
@@ -547,6 +553,10 @@ public class VoIPFragment implements
     }
 
     private void destroy() {
+        if (micDebug != null) {
+            micDebug.stop();
+            micDebug = null;
+        }
         if (VoIPService.getSharedInstance() != null) {
             VoIPService.getSharedInstance().unregisterStateListener(this);
         }
@@ -1092,6 +1102,44 @@ public class VoIPFragment implements
         buttonsLayout.addView(bottomVideoBtn);
         buttonsLayout.addView(bottomMuteBtn);
         buttonsLayout.addView(bottomEndCallBtn);
+
+        micDebugStatus = new TextView(context);
+        micDebugStatus.setText("Mic debug: stopped");
+        micDebugStatus.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+        micDebugStatus.setTextColor(Color.WHITE);
+        micDebugStatus.setGravity(Gravity.CENTER);
+        micDebugStatus.setBackgroundColor(ColorUtils.setAlphaComponent(Color.BLACK, 180));
+        micDebugStatus.setPadding(dp(12), dp(8), dp(12), dp(8));
+        micDebugStatus.setMaxLines(4);
+        micDebugStatus.setOnClickListener(view -> {
+            if (micDebug == null) {
+                micDebug = new VoIPMicDebug(status -> micDebugStatus.setText(status));
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                    activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                micDebugStatus.setText("Mic debug: RECORD_AUDIO permission not granted");
+                activity.requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 103);
+                return;
+            }
+            micDebug.start(context);
+        });
+        micDebugStatus.setOnLongClickListener(view -> {
+            EditText urlField = new EditText(context);
+            urlField.setText(TranslationConfig.getBackendUrl());
+            AlertDialog dialog = new AlertDialog.Builder(context)
+                    .setTitle("Translation backend URL")
+                    .setView(urlField)
+                    .setPositiveButton(LocaleController.getString(R.string.OK), (dialogInterface, which) -> {
+                        TranslationConfig.setBackendUrl(urlField.getText().toString());
+                        micDebugStatus.setText("Backend URL saved");
+                    })
+                    .setNegativeButton(LocaleController.getString(R.string.Cancel), null)
+                    .create();
+            dialog.show();
+            return true;
+        });
+        frameLayout.addView(micDebugStatus, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT,
+                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 16, 0, 16, 176));
 
         acceptDeclineView = new AcceptDeclineView(context);
         acceptDeclineView.setListener(new AcceptDeclineView.Listener() {

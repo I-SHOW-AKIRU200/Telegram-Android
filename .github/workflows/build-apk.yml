@@ -43,26 +43,31 @@ jobs:
             # Shallow clone may not contain the pinned commit object itself.
             git fetch --depth=1 origin "${TELEGRAM_COMMIT}"
           fi
-          CHANGED="$(git diff --name-only "${TELEGRAM_COMMIT}" -- . ':(exclude).github')"
+          CHANGED="$(git diff --name-only "${TELEGRAM_COMMIT}" -- . \
+            ':(exclude).github' \
+            ':(exclude)TMessagesProj/src/main/java/org/telegram/ui/VoIPFragment.java' \
+            ':(exclude)TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java' \
+            ':(exclude)TMessagesProj/src/main/java/org/telegram/messenger/translation')"
           if [ -n "$CHANGED" ]; then
             echo "::error::App source differs from pinned commit ${TELEGRAM_COMMIT}:"
             echo "$CHANGED"
             exit 1
           fi
-          echo "OK: app source is byte-identical to ${TELEGRAM_COMMIT} (only .github/ differs)."
+          echo "OK: source changes are limited to the mic spike and build-time config."
 
       - name: Check secrets are present
         if: ${{ inputs.smoke_test != true }}
         env:
           API_ID: ${{ secrets.TELEGRAM_API_ID }}
           API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          APP_SECRET: ${{ secrets.APP_SHARED_SECRET }}
         run: |
-          if [ -z "$API_ID" ] || [ -z "$API_HASH" ]; then
-            echo "::error::Missing repository secrets TELEGRAM_API_ID and/or TELEGRAM_API_HASH."
+          if [ -z "$API_ID" ] || [ -z "$API_HASH" ] || [ -z "$APP_SECRET" ]; then
+            echo "::error::Missing repository secrets TELEGRAM_API_ID, TELEGRAM_API_HASH, and/or APP_SHARED_SECRET."
             echo "Add them in Settings > Secrets and variables > Actions."
             exit 1
           fi
-          echo "Both secrets present. Values are not printed."
+          echo "Required secrets are present. Values are not printed."
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -114,16 +119,21 @@ jobs:
         env:
           API_ID: ${{ secrets.TELEGRAM_API_ID }}
           API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          APP_SECRET: ${{ secrets.APP_SHARED_SECRET }}
         run: |
           F=TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java
           sed -i -E "s/(public static int APP_ID = )[^;]+;/\1${API_ID};/" "$F"
           sed -i -E "s/(public static String APP_HASH = \")[^\"]*\";/\1${API_HASH}\";/" "$F"
+          sed -i -E "s/(public static String APP_SHARED_SECRET = \")[^\"]*\";/\1${APP_SECRET}\";/" "$F"
           # Verify without printing the values (the file would echo the secrets).
           if ! grep -qE "public static int APP_ID = ${API_ID};" "$F"; then
             echo "::error::APP_ID injection failed"; exit 1
           fi
           if ! grep -qF "${API_HASH}" "$F"; then
             echo "::error::APP_HASH injection failed"; exit 1
+          fi
+          if ! grep -qF "APP_SHARED_SECRET = \"${APP_SECRET}\"" "$F"; then
+            echo "::error::APP_SHARED_SECRET injection failed"; exit 1
           fi
           echo "Credentials injected into the working tree only (never committed, not printed)."
 
