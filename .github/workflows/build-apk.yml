@@ -11,10 +11,6 @@ on:
         description: 'Build with the API credentials already present in the source (no secrets needed). Verifies the toolchain only.'
         type: boolean
         default: false
-  push:
-    branches: [ master ]
-    paths:
-      - '.github/workflows/build-apk.yml'
 
 permissions:
   contents: read
@@ -30,14 +26,30 @@ jobs:
     timeout-minutes: 240
 
     steps:
-      - name: Checkout
+      - name: Checkout (with submodules)
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Show pinned commit
         run: |
           echo "Building commit: $(git rev-parse HEAD)"
           echo "Expected pin:    ${TELEGRAM_COMMIT}"
           echo "Version:         $(grep '^APP_VERSION_NAME' gradle.properties)"
+
+      - name: Verify app source is unmodified vs pinned upstream commit
+        run: |
+          if ! git cat-file -e "${TELEGRAM_COMMIT}^{commit}" 2>/dev/null; then
+            # Shallow clone may not contain the pinned commit object itself.
+            git fetch --depth=1 origin "${TELEGRAM_COMMIT}"
+          fi
+          CHANGED="$(git diff --name-only "${TELEGRAM_COMMIT}" -- . ':(exclude).github')"
+          if [ -n "$CHANGED" ]; then
+            echo "::error::App source differs from pinned commit ${TELEGRAM_COMMIT}:"
+            echo "$CHANGED"
+            exit 1
+          fi
+          echo "OK: app source is byte-identical to ${TELEGRAM_COMMIT} (only .github/ differs)."
 
       - name: Check secrets are present
         if: ${{ inputs.smoke_test != true }}
@@ -80,6 +92,9 @@ jobs:
           echo "--- installed ---"
           ls "${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk" 2>/dev/null || true
           ls "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmake" 2>/dev/null || true
+
+      - name: Show disk space
+        run: df -h / /home/runner 2>/dev/null || df -h /
 
       - name: Set up Gradle (with cache)
         uses: gradle/actions/setup-gradle@v4
