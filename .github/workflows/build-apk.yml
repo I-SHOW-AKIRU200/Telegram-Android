@@ -58,18 +58,28 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install SDK packages, NDK and CMake
         run: |
-          yes | sdkmanager --licenses > /dev/null
-          sdkmanager \
+          # ubuntu-latest runners ship the Android SDK + sdkmanager already.
+          # (android-actions/setup-android@v3 breaks here: it still asks for the
+          # removed "tools" package and exits 1 with cmdline-tools 16.0.)
+          SDKMANAGER="$(command -v sdkmanager || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}" -path '*/cmdline-tools/*/bin/sdkmanager' | head -1)"
+          fi
+          echo "Using sdkmanager: $SDKMANAGER"
+          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" \
             "platforms;android-36" \
             "build-tools;36.0.0" \
             "platform-tools" \
             "ndk;27.2.12479018" \
             "cmake;3.22.1"
+          echo "--- installed ---"
+          ls "${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk" 2>/dev/null || true
+          ls "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmake" 2>/dev/null || true
 
       - name: Set up Gradle (with cache)
         uses: gradle/actions/setup-gradle@v4
