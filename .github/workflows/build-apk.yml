@@ -6,6 +6,11 @@ name: Build debug APK
 
 on:
   workflow_dispatch:
+    inputs:
+      smoke_test:
+        description: 'Build with the API credentials already present in the source (no secrets needed). Verifies the toolchain only.'
+        type: boolean
+        default: false
   push:
     branches: [ master ]
     paths:
@@ -35,6 +40,7 @@ jobs:
           echo "Version:         $(grep '^APP_VERSION_NAME' gradle.properties)"
 
       - name: Check secrets are present
+        if: ${{ inputs.smoke_test != true }}
         env:
           API_ID: ${{ secrets.TELEGRAM_API_ID }}
           API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
@@ -68,7 +74,13 @@ jobs:
       - name: Set up Gradle (with cache)
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Smoke test notice
+        if: ${{ inputs.smoke_test == true }}
+        run: |
+          echo "::warning::SMOKE TEST run: secrets not required; this build uses the API credentials already present in the source. Do not distribute this APK."
+
       - name: Inject API credentials at build time
+        if: ${{ inputs.smoke_test != true }}
         env:
           API_ID: ${{ secrets.TELEGRAM_API_ID }}
           API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
