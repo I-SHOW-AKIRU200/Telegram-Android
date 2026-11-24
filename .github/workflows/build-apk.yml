@@ -1,0 +1,105 @@
+name: Build debug APK
+
+# Phase 1 goal: prove the UNMODIFIED Telegram-Android source compiles and produces
+# an installable APK. No app code is changed by this workflow; the only edit it makes
+# is injecting the API credentials at build time (never committed).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master ]
+    paths:
+      - '.github/workflows/build-apk.yml'
+
+permissions:
+  contents: read
+
+env:
+  # Pinned upstream commit this project is built against (see PROGRESS.md).
+  TELEGRAM_COMMIT: 21f7d109da6ab3506c9e9577f98c6a38771ab335
+  GRADLE_TASK: ':TMessagesProj_App:assembleAfatDebug'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show pinned commit
+        run: |
+          echo "Building commit: $(git rev-parse HEAD)"
+          echo "Expected pin:    ${TELEGRAM_COMMIT}"
+          echo "Version:         $(grep '^APP_VERSION_NAME' gradle.properties)"
+
+      - name: Check secrets are present
+        env:
+          API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        run: |
+          if [ -z "$API_ID" ] || [ -z "$API_HASH" ]; then
+            echo "::error::Missing repository secrets TELEGRAM_API_ID and/or TELEGRAM_API_HASH."
+            echo "Add them in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "Both secrets present (id length: ${#API_ID}, hash length: ${#API_HASH})"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages, NDK and CMake
+        run: |
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "platform-tools" \
+            "ndk;27.2.12479018" \
+            "cmake;3.22.1"
+
+      - name: Set up Gradle (with cache)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Inject API credentials at build time
+        env:
+          API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        run: |
+          F=TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java
+          sed -i -E "s/(public static int APP_ID = )[^;]+;/\1${API_ID};/" "$F"
+          sed -i -E "s/(public static String APP_HASH = \")[^\"]*\";/\1${API_HASH}\";/" "$F"
+          grep -nE 'APP_ID = |APP_HASH = ' "$F"
+          if ! grep -qE "public static int APP_ID = ${API_ID};" "$F"; then
+            echo "::error::APP_ID injection failed"; exit 1
+          fi
+          if ! grep -q "${API_HASH}" "$F"; then
+            echo "::error::APP_HASH injection failed"; exit 1
+          fi
+          echo "Credentials injected into working tree only (not committed)."
+
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew ${GRADLE_TASK} --stacktrace --no-daemon
+
+      - name: List APK outputs
+        if: always()
+        run: |
+          find TMessagesProj_App/build/outputs -name '*.apk' -printf '%p  %s bytes\n' 2>/dev/null || echo "no APK found"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-debug-apk
+          path: TMessagesProj_App/build/outputs/apk/afat/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
