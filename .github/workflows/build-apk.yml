@@ -62,7 +62,7 @@ jobs:
             echo "Add them in Settings > Secrets and variables > Actions."
             exit 1
           fi
-          echo "Both secrets present (id length: ${#API_ID}, hash length: ${#API_HASH})"
+          echo "Both secrets present. Values are not printed."
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -96,8 +96,13 @@ jobs:
       - name: Show disk space
         run: df -h / /home/runner 2>/dev/null || df -h /
 
-      - name: Set up Gradle (with cache)
+      - name: Set up Gradle (with dependency + build cache)
         uses: gradle/actions/setup-gradle@v4
+        with:
+          # Restores/saves ~/.gradle/caches (dependencies, wrapper, build cache)
+          # and enables Gradle's build cache for faster rebuilds.
+          cache-read-only: false
+          gradle-home-cache-cleanup: true
 
       - name: Smoke test notice
         if: ${{ inputs.smoke_test == true }}
@@ -113,19 +118,19 @@ jobs:
           F=TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java
           sed -i -E "s/(public static int APP_ID = )[^;]+;/\1${API_ID};/" "$F"
           sed -i -E "s/(public static String APP_HASH = \")[^\"]*\";/\1${API_HASH}\";/" "$F"
-          grep -nE 'APP_ID = |APP_HASH = ' "$F"
+          # Verify without printing the values (the file would echo the secrets).
           if ! grep -qE "public static int APP_ID = ${API_ID};" "$F"; then
             echo "::error::APP_ID injection failed"; exit 1
           fi
-          if ! grep -q "${API_HASH}" "$F"; then
+          if ! grep -qF "${API_HASH}" "$F"; then
             echo "::error::APP_HASH injection failed"; exit 1
           fi
-          echo "Credentials injected into working tree only (not committed)."
+          echo "Credentials injected into the working tree only (never committed, not printed)."
 
       - name: Build debug APK
         run: |
           chmod +x gradlew
-          ./gradlew ${GRADLE_TASK} --stacktrace --no-daemon
+          ./gradlew ${GRADLE_TASK} --build-cache --stacktrace --no-daemon
 
       - name: List APK outputs
         if: always()
@@ -138,5 +143,7 @@ jobs:
           name: telegram-debug-apk
           path: TMessagesProj_App/build/outputs/apk/afat/debug/*.apk
           if-no-files-found: error
-          retention-days: 30
+          # This APK embeds the API credentials and the fork is public: keep the
+          # artifact only 1 day. Download it, then delete the run/artifact.
+          retention-days: 1
           compression-level: 0
