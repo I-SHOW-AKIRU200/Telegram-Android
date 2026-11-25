@@ -117,7 +117,7 @@ public final class VoIPMicDebug {
             socket = new WebSocketFactory()
                     .setConnectionTimeout(15_000)
                     .createSocket(streamUrl)
-                    .setHeader("X-App-Secret", secret)
+                    .addHeader("X-App-Secret", secret)
                     .addListener(new WebSocketAdapter() {
                         @Override
                         public void onTextMessage(WebSocket ws, String text) {
