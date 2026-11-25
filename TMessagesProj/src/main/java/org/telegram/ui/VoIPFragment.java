@@ -54,6 +54,7 @@ import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.animation.LinearInterpolator;
 import android.widget.FrameLayout;
+import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -1110,7 +1111,7 @@ public class VoIPFragment implements
         micDebugStatus.setGravity(Gravity.CENTER);
         micDebugStatus.setBackgroundColor(ColorUtils.setAlphaComponent(Color.BLACK, 180));
         micDebugStatus.setPadding(dp(12), dp(8), dp(12), dp(8));
-        micDebugStatus.setMaxLines(4);
+        micDebugStatus.setMaxLines(8);
         micDebugStatus.setOnClickListener(view -> {
             if (micDebug == null) {
                 micDebug = new VoIPMicDebug(status -> micDebugStatus.setText(status));
@@ -1138,8 +1139,33 @@ public class VoIPFragment implements
             dialog.show();
             return true;
         });
-        frameLayout.addView(micDebugStatus, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT,
-                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 16, 0, 16, 176));
+        Button sendMicSampleButton = new Button(context);
+        sendMicSampleButton.setText("Send 8 s to backend");
+        sendMicSampleButton.setAllCaps(false);
+        sendMicSampleButton.setOnClickListener(view -> {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                    activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                micDebugStatus.setText("Mic debug: RECORD_AUDIO permission not granted");
+                activity.requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 103);
+                return;
+            }
+            if (micDebug == null) {
+                micDebug = new VoIPMicDebug(status -> micDebugStatus.setText(status));
+            }
+            micDebug.sendEightSeconds(
+                    context,
+                    TranslationConfig.getBackendUrl(),
+                    TranslationConfig.getAppSecret()
+            );
+        });
+        LinearLayout micDebugPanel = new LinearLayout(context);
+        micDebugPanel.setOrientation(LinearLayout.VERTICAL);
+        micDebugPanel.addView(sendMicSampleButton, LayoutHelper.createLinear(
+                LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        micDebugPanel.addView(micDebugStatus, LayoutHelper.createLinear(
+                LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        frameLayout.addView(micDebugPanel, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT,
+                LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 16, 0, 16, 176));
 
         acceptDeclineView = new AcceptDeclineView(context);
         acceptDeclineView.setListener(new AcceptDeclineView.Listener() {

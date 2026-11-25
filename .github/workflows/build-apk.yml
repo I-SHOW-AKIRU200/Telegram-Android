@@ -1,8 +1,7 @@
 name: Build debug APK
 
-# Phase 1 goal: prove the UNMODIFIED Telegram-Android source compiles and produces
-# an installable APK. No app code is changed by this workflow; the only edit it makes
-# is injecting the API credentials at build time (never committed).
+# Builds the mic diagnostic spike APK. API credentials are injected at build time
+# only; native objects are cached with ccache for subsequent builds.
 
 on:
   workflow_dispatch:
@@ -47,13 +46,15 @@ jobs:
             ':(exclude).github' \
             ':(exclude)TMessagesProj/src/main/java/org/telegram/ui/VoIPFragment.java' \
             ':(exclude)TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java' \
-            ':(exclude)TMessagesProj/src/main/java/org/telegram/messenger/translation')"
+            ':(exclude)TMessagesProj/src/main/java/org/telegram/messenger/translation' \
+            ':(exclude)TMessagesProj/build.gradle' \
+            ':(exclude)TMessagesProj_App/build.gradle')"
           if [ -n "$CHANGED" ]; then
             echo "::error::App source differs from pinned commit ${TELEGRAM_COMMIT}:"
             echo "$CHANGED"
             exit 1
           fi
-          echo "OK: source changes are limited to the mic spike and build-time config."
+          echo "OK: source and build config changes are limited to the spike."
 
       - name: Check secrets are present
         if: ${{ inputs.smoke_test != true }}
@@ -101,6 +102,23 @@ jobs:
       - name: Show disk space
         run: df -h / /home/runner 2>/dev/null || df -h /
 
+      - name: Install ccache
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ccache
+          mkdir -p "$HOME/.cache/ccache"
+          ccache --max-size=2G
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+
+      - name: Restore native compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-ndk27.2-cmake3.22-arm64-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-ndk27.2-cmake3.22-arm64-
+
       - name: Set up Gradle (with dependency + build cache)
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -140,12 +158,16 @@ jobs:
       - name: Build debug APK
         run: |
           chmod +x gradlew
+          START_EPOCH=$(date +%s)
           ./gradlew ${GRADLE_TASK} --build-cache --stacktrace --no-daemon
+          echo "Gradle build elapsed: $(( $(date +%s) - START_EPOCH )) seconds"
+          ccache --show-stats
 
       - name: List APK outputs
         if: always()
         run: |
           find TMessagesProj_App/build/outputs -name '*.apk' -printf '%p  %s bytes\n' 2>/dev/null || echo "no APK found"
+          ccache --show-stats || true
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
